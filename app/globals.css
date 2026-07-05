@@ -5,6 +5,8 @@
   --accent: #3f6b4a;
   --accent-soft: #eaf1e8;
   --error: #a3402d;
+  --sidebar-bg: #1c2b25;
+  --sidebar-text: #cdd9cf;
 }
 
 * {
@@ -20,10 +22,93 @@ body {
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-.wrap {
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 220px;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  padding: 28px 18px;
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: white;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--sidebar-text);
+  text-decoration: none;
+}
+
+.nav-item-active {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-weight: 600;
+}
+
+.nav-item-disabled {
+  color: rgba(205, 217, 207, 0.4);
+  cursor: default;
+}
+
+.nav-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Main content */
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.page {
   max-width: 720px;
   margin: 0 auto;
-  padding: 56px 24px 80px;
+  padding: 56px 24px 100px;
 }
 
 .eyebrow {
@@ -47,6 +132,57 @@ h1 {
   font-size: 15px;
 }
 
+/* Dashboard grid */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.tile {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+  background: white;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.tile-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tile-soon {
+  opacity: 0.6;
+}
+
+.tile-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.tile-soon .tile-label {
+  color: #8a8a8a;
+}
+
+.tile-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tile-desc {
+  font-size: 13px;
+  color: #5b6b60;
+}
+
+/* Card / form (extract page) */
 .card {
   background: white;
   border: 1px solid var(--line);
@@ -161,4 +297,25 @@ h1 {
   font-size: 12.5px;
   color: #7c8a7e;
   margin-top: 6px;
+}
+
+/* Easter egg */
+.easter-egg {
+  position: fixed;
+  bottom: 10px;
+  right: 14px;
+  font-size: 11px;
+  color: #9aa89e;
+  opacity: 0.55;
+  letter-spacing: 0.02em;
+  user-select: none;
+  transition: opacity 0.2s ease;
+}
+
+.easter-egg:hover {
+  opacity: 1;
+}
+
+.easter-egg .heart {
+  color: var(--error);
 }

@@ -1,8 +1,10 @@
 import "./globals.css";
+import Sidebar from "./components/Sidebar";
+import Footer from "./components/Footer";
 
 export const metadata = {
-  title: "PDF to Excel",
-  description: "Extract tables from PDF invoices into Excel.",
+  title: "Saga Yasuo | Dashboard",
+  description: "Extract invoice data into Excel, with tracking features on the way.",
 };
 
 export default function RootLayout({
@@ -12,7 +14,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="shell">
+          <Sidebar />
+          <main className="main">{children}</main>
+        </div>
+        <Footer />
+      </body>
     </html>
   );
 }
