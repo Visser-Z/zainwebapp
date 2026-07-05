@@ -4,6 +4,9 @@ import { useState, useRef } from "react";
 
 type Mode = "new" | "append";
 
+const MAX_PDF_MB = 15;
+const MAX_XLSX_MB = 15;
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -28,16 +31,24 @@ export default function ExtractPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const acceptPdf = (file: File) => {
+    if (file.type !== "application/pdf") {
+      setStatus({ type: "error", message: "Please choose a PDF file." });
+      return;
+    }
+    if (file.size > MAX_PDF_MB * 1024 * 1024) {
+      setStatus({ type: "error", message: `PDF is too large — max ${MAX_PDF_MB} MB.` });
+      return;
+    }
+    setPdfFile(file);
+    setStatus(null);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragActive(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") {
-      setPdfFile(file);
-      setStatus(null);
-    } else {
-      setStatus({ type: "error", message: "Please drop a PDF file." });
-    }
+    if (file) acceptPdf(file);
   };
 
   const handleSubmit = async () => {
@@ -130,7 +141,7 @@ export default function ExtractPage() {
             style={{ display: "none" }}
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) setPdfFile(file);
+              if (file) acceptPdf(file);
             }}
           />
         </div>
@@ -163,7 +174,12 @@ export default function ExtractPage() {
               accept=".xlsx"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) setExistingFile(file);
+                if (!file) return;
+                if (file.size > MAX_XLSX_MB * 1024 * 1024) {
+                  setStatus({ type: "error", message: `Spreadsheet is too large — max ${MAX_XLSX_MB} MB.` });
+                  return;
+                }
+                setExistingFile(file);
               }}
             />
             <div className="hint">Rows from this PDF will be added to the end of this file.</div>

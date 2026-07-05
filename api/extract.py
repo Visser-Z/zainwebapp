@@ -8,6 +8,15 @@ Reuses the same logic validated in the local extract.py script:
   - falls back to raw text lines if no table is found
   - supports "new" (fresh workbook) or "append" (add rows to an uploaded
     existing .xlsx) modes, chosen by the client
+
+Hardening added:
+  - rejects payloads with no PDF, or PDFs over the size limit
+  - verifies the uploaded bytes actually look like a PDF (magic header)
+  - verifies an "existing" append target actually looks like an .xlsx (zip header)
+  - catches PDF parsing failures (corrupt/encrypted files) with a clean error
+    instead of a raw 500
+  - sanitizes the output filename so it can't contain path separators or
+    other unsafe characters
 """
 
 import re
@@ -21,6 +30,11 @@ from openpyxl.utils import get_column_letter
 app = Flask(__name__)
 
 NUMERIC_PATTERN = re.compile(r"^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$")
+
+MAX_PDF_BYTES = 15 * 1024 * 1024        # 15 MB
+MAX_EXISTING_XLSX_BYTES = 15 * 1024 * 1024
+PDF_MAGIC = b"%PDF-"
+XLSX_MAGIC = b"PK"                      # xlsx files are zip archives
 
 
 def to_number_if_possible(value):
@@ -106,30 +120,87 @@ def append_to_workbook(existing_bytes, header, rows, sheet_name):
     return wb
 
 
+def sanitize_filename(name, fallback="extracted_data.xlsx"):
+    if not isinstance(name, str) or not name.strip():
+        return fallback
+    # keep letters, numbers, spaces, dashes, underscores, and a single dot before the extension
+    name = name.strip().replace("/", "").replace("\\", "")
+    name = re.sub(r"[^A-Za-z0-9 ._-]", "", name)
+    name = name.strip(" .")
+    if not name:
+        return fallback
+    if not name.lower().endswith(".xlsx"):
+        name += ".xlsx"
+    return name[:120]  # keep it reasonable
+
+
+def sanitize_sheet_name(name, fallback="Extracted"):
+    if not isinstance(name, str) or not name.strip():
+        return fallback
+    # Excel sheet names: no []:*?/\ and max 31 chars
+    name = re.sub(r"[\[\]:*?/\\]", "", name).strip()
+    return (name or fallback)[:31]
+
+
 @app.route("/api/extract", methods=["POST"])
 def extract():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing request body."}), 400
 
     pdf_b64 = data.get("pdf_base64")
     if not pdf_b64:
         return jsonify({"error": "No PDF provided."}), 400
 
+    try:
+        pdf_bytes = base64.b64decode(pdf_b64, validate=True)
+    except Exception:
+        return jsonify({"error": "The PDF data was corrupted in transit. Please try again."}), 400
+
+    if len(pdf_bytes) == 0:
+        return jsonify({"error": "The uploaded PDF is empty."}), 400
+
+    if len(pdf_bytes) > MAX_PDF_BYTES:
+        return jsonify({"error": f"PDF is too large (max {MAX_PDF_BYTES // (1024 * 1024)} MB)."}), 400
+
+    if not pdf_bytes.startswith(PDF_MAGIC):
+        return jsonify({"error": "That file doesn't look like a valid PDF."}), 400
+
     mode = data.get("mode", "new")
-    sheet_name = data.get("sheet_name") or "Extracted"
-    filename = data.get("filename") or "extracted_data.xlsx"
+    sheet_name = sanitize_sheet_name(data.get("sheet_name"))
+    filename = sanitize_filename(data.get("filename"))
     existing_b64 = data.get("existing_xlsx_base64")
 
-    pdf_bytes = base64.b64decode(pdf_b64)
-    header, rows, used_real_tables = extract_rows_from_bytes(pdf_bytes)
+    existing_bytes = None
+    if mode == "append" and existing_b64:
+        try:
+            existing_bytes = base64.b64decode(existing_b64, validate=True)
+        except Exception:
+            return jsonify({"error": "The existing spreadsheet data was corrupted in transit."}), 400
+
+        if len(existing_bytes) > MAX_EXISTING_XLSX_BYTES:
+            return jsonify({"error": "The existing spreadsheet is too large."}), 400
+
+        if not existing_bytes.startswith(XLSX_MAGIC):
+            return jsonify({"error": "That existing file doesn't look like a valid .xlsx spreadsheet."}), 400
+
+    try:
+        header, rows, used_real_tables = extract_rows_from_bytes(pdf_bytes)
+    except Exception:
+        return jsonify({
+            "error": "Couldn't read this PDF. It may be corrupted, password-protected, or a scanned image without selectable text."
+        }), 400
 
     if header is None:
         return jsonify({"error": "No extractable content found in this PDF."}), 400
 
-    if mode == "append" and existing_b64:
-        existing_bytes = base64.b64decode(existing_b64)
-        wb = append_to_workbook(existing_bytes, header, rows, sheet_name)
-    else:
-        wb = build_new_workbook(header, rows, sheet_name)
+    try:
+        if mode == "append" and existing_bytes:
+            wb = append_to_workbook(existing_bytes, header, rows, sheet_name)
+        else:
+            wb = build_new_workbook(header, rows, sheet_name)
+    except Exception:
+        return jsonify({"error": "Couldn't read the existing spreadsheet. It may be corrupted or in an unsupported format."}), 400
 
     buf = io.BytesIO()
     wb.save(buf)
