@@ -1,29 +1,78 @@
 """
 Vercel Python serverless function: build the final .xlsx (step 2 of 2).
+Self-contained (no cross-file imports) to avoid Vercel Python bundling issues.
 
 Takes the header/rows the user already reviewed in the preview step,
 plus the target mode/filename/sheet, and returns the finished spreadsheet.
-Re-validates the existing-spreadsheet upload independently, since this is
-a separate request from the preview step.
 """
 
+import re
 import io
 import base64
 import logging
 from flask import Flask, request, jsonify
-
-from _shared import (
-    build_new_workbook,
-    append_to_workbook,
-    sanitize_filename,
-    sanitize_sheet_name,
-    MAX_EXISTING_XLSX_BYTES,
-    XLSX_MAGIC,
-)
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pdf-build")
+
+MAX_EXISTING_XLSX_BYTES = 15 * 1024 * 1024
+XLSX_MAGIC = b"PK"
+
+
+def autosize_columns(ws):
+    for col_cells in ws.columns:
+        max_len = max((len(str(c.value)) for c in col_cells if c.value is not None), default=10)
+        col_letter = get_column_letter(col_cells[0].column)
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 60)
+
+
+def build_new_workbook(header, rows, sheet_name):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    ws.append(header)
+    for row in rows:
+        ws.append(row)
+    autosize_columns(ws)
+    return wb
+
+
+def append_to_workbook(existing_bytes, header, rows, sheet_name):
+    wb = load_workbook(io.BytesIO(existing_bytes))
+    if sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        if ws.max_row == 0 or ws.cell(row=1, column=1).value is None:
+            ws.append(header)
+    else:
+        ws = wb.create_sheet(sheet_name)
+        ws.append(header)
+    for row in rows:
+        ws.append(row)
+    autosize_columns(ws)
+    return wb
+
+
+def sanitize_filename(name, fallback="extracted_data.xlsx"):
+    if not isinstance(name, str) or not name.strip():
+        return fallback
+    name = name.strip().replace("/", "").replace("\\", "")
+    name = re.sub(r"[^A-Za-z0-9 ._-]", "", name)
+    name = name.strip(" .")
+    if not name:
+        return fallback
+    if not name.lower().endswith(".xlsx"):
+        name += ".xlsx"
+    return name[:120]
+
+
+def sanitize_sheet_name(name, fallback="Extracted"):
+    if not isinstance(name, str) or not name.strip():
+        return fallback
+    name = re.sub(r"[\[\]:*?/\\]", "", name).strip()
+    return (name or fallback)[:31]
 
 
 @app.route("/api/build", methods=["POST"])

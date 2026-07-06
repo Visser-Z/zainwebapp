@@ -1,31 +1,106 @@
 """
 Vercel Python serverless function: PDF -> preview (step 1 of 2).
+Self-contained (no cross-file imports) to avoid Vercel Python bundling issues.
 
 Validates and parses the PDF, returns the extracted header/rows as JSON
 so the frontend can show a review table before anything is written.
 If an existing spreadsheet is supplied (append mode), also flags how many
-of the new rows already appear in that sheet, so the user can catch
-accidental re-uploads before confirming.
+of the new rows already appear in that sheet.
 
 The actual .xlsx is only built in /api/build, after the user confirms.
 """
 
+import re
+import io
 import base64
 import logging
+import pdfplumber
+from openpyxl import load_workbook
 from flask import Flask, request, jsonify
-
-from _shared import (
-    extract_rows_from_bytes,
-    get_existing_row_signatures,
-    MAX_PDF_BYTES,
-    MAX_EXISTING_XLSX_BYTES,
-    PDF_MAGIC,
-    XLSX_MAGIC,
-)
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pdf-extract")
+
+NUMERIC_PATTERN = re.compile(r"^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$")
+MAX_PDF_BYTES = 15 * 1024 * 1024
+MAX_EXISTING_XLSX_BYTES = 15 * 1024 * 1024
+PDF_MAGIC = b"%PDF-"
+XLSX_MAGIC = b"PK"
+
+
+def to_number_if_possible(value):
+    if not isinstance(value, str) or value == "":
+        return value
+    stripped = value.replace(",", "")
+    if NUMERIC_PATTERN.match(value):
+        try:
+            if "." in stripped:
+                return float(stripped)
+            return int(stripped)
+        except ValueError:
+            return value
+    return value
+
+
+def _row_matches_header(clean_row, header_without_page):
+    if len(clean_row) != len(header_without_page):
+        return False
+    return [c.strip().lower() for c in clean_row] == [h.strip().lower() for h in header_without_page]
+
+
+def extract_rows_from_bytes(pdf_bytes):
+    all_rows = []
+    header = None
+    header_without_page = None
+    any_tables_found = False
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            tables = page.extract_tables()
+
+            if tables:
+                any_tables_found = True
+                for table in tables:
+                    if not table:
+                        continue
+                    start_idx = 0
+                    if header is None:
+                        first_row = ["" if c is None else str(c).strip() for c in table[0]]
+                        header = ["page"] + first_row
+                        header_without_page = first_row
+                        start_idx = 1
+
+                    for row in table[start_idx:]:
+                        clean_row = ["" if cell is None else str(cell).strip() for cell in row]
+                        if header_without_page and _row_matches_header(clean_row, header_without_page):
+                            continue
+                        typed_row = [to_number_if_possible(v) for v in clean_row]
+                        all_rows.append([page_num] + typed_row)
+            else:
+                text = page.extract_text() or ""
+                if not text.strip():
+                    continue
+                if header is None:
+                    header = ["page", "text_line"]
+                for line in text.split("\n"):
+                    if line.strip():
+                        all_rows.append([page_num, line.strip()])
+
+    return header, all_rows, any_tables_found
+
+
+def get_existing_row_signatures(existing_bytes, sheet_name):
+    wb = load_workbook(io.BytesIO(existing_bytes))
+    if sheet_name not in wb.sheetnames:
+        return set()
+    ws = wb[sheet_name]
+    signatures = set()
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            continue
+        signatures.add(tuple("" if v is None else str(v) for v in row))
+    return signatures
 
 
 @app.route("/api/extract", methods=["POST"])
