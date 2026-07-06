@@ -2,6 +2,9 @@
   "functions": {
     "api/extract.py": {
       "maxDuration": 30
+    },
+    "api/build.py": {
+      "maxDuration": 30
     }
   }
 }

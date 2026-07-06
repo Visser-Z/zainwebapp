@@ -299,6 +299,77 @@ h1 {
   margin-top: 6px;
 }
 
+/* Warning banner */
+.warning-banner {
+  background: #fdf3ea;
+  border: 1px solid #e8c9a3;
+  color: #7a4a1f;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+
+/* Preview table */
+.preview-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.preview-table th {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.preview-table tr:last-child td {
+  border-bottom: none;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.preview-actions .submit-btn {
+  margin-top: 0;
+  flex: 1;
+}
+
+.secondary-btn {
+  padding: 13px 20px;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Login */
 .login-wrap {
   position: fixed;

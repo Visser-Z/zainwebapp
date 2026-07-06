@@ -3,9 +3,11 @@
 import { useState, useRef } from "react";
 
 type Mode = "new" | "append";
+type Stage = "form" | "preview";
 
 const MAX_PDF_MB = 15;
 const MAX_XLSX_MB = 15;
+const PREVIEW_ROW_LIMIT = 25;
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,6 +31,16 @@ export default function ExtractPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: "error" | "success" | "info"; message: string } | null>(null);
 
+  const [stage, setStage] = useState<Stage>("form");
+  const [preview, setPreview] = useState<{
+    header: string[];
+    rows: any[][];
+    row_count: number;
+    used_real_tables: boolean;
+    duplicate_count: number;
+  } | null>(null);
+  const [existingB64, setExistingB64] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const acceptPdf = (file: File) => {
@@ -51,7 +63,7 @@ export default function ExtractPage() {
     if (file) acceptPdf(file);
   };
 
-  const handleSubmit = async () => {
+  const handleExtract = async () => {
     if (!pdfFile) {
       setStatus({ type: "error", message: "Choose a PDF first." });
       return;
@@ -67,6 +79,7 @@ export default function ExtractPage() {
     try {
       const pdf_base64 = await fileToBase64(pdfFile);
       const existing_xlsx_base64 = existingFile ? await fileToBase64(existingFile) : null;
+      setExistingB64(existing_xlsx_base64);
 
       const res = await fetch("/api/extract", {
         method: "POST",
@@ -74,8 +87,6 @@ export default function ExtractPage() {
         body: JSON.stringify({
           pdf_base64,
           existing_xlsx_base64,
-          mode,
-          filename: outputName.endsWith(".xlsx") ? outputName : `${outputName}.xlsx`,
           sheet_name: sheetName || "Extracted",
         }),
       });
@@ -83,6 +94,41 @@ export default function ExtractPage() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(err.error || "Extraction failed.");
+      }
+
+      const data = await res.json();
+      setPreview(data);
+      setStage("preview");
+      setStatus(null);
+    } catch (err: any) {
+      setStatus({ type: "error", message: err.message || "Something went wrong." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!preview) return;
+    setLoading(true);
+    setStatus({ type: "info", message: "Building spreadsheet..." });
+
+    try {
+      const res = await fetch("/api/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          header: preview.header,
+          rows: preview.rows,
+          mode,
+          existing_xlsx_base64: existingB64,
+          filename: outputName.endsWith(".xlsx") ? outputName : `${outputName}.xlsx`,
+          sheet_name: sheetName || "Extracted",
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || "Build failed.");
       }
 
       const data = await res.json();
@@ -104,10 +150,13 @@ export default function ExtractPage() {
 
       setStatus({
         type: "success",
-        message: `Done — ${data.row_count} rows ${mode === "append" ? "added" : "written"}.${
-          data.used_real_tables ? "" : " (No table structure detected — rows are raw text lines.)"
-        }`,
+        message: `Done — ${data.row_count} rows ${mode === "append" ? "added" : "written"} to ${data.filename}.`,
       });
+      setStage("form");
+      setPreview(null);
+      setPdfFile(null);
+      setExistingFile(null);
+      setExistingB64(null);
     } catch (err: any) {
       setStatus({ type: "error", message: err.message || "Something went wrong." });
     } finally {
@@ -115,11 +164,75 @@ export default function ExtractPage() {
     }
   };
 
+  const handleCancelPreview = () => {
+    setStage("form");
+    setPreview(null);
+    setStatus(null);
+  };
+
+  if (stage === "preview" && preview) {
+    const shownRows = preview.rows.slice(0, PREVIEW_ROW_LIMIT);
+    return (
+      <div className="page">
+        <div className="eyebrow">Review</div>
+        <h1>Check this before saving</h1>
+        <p className="subtitle">
+          Found {preview.row_count} row{preview.row_count === 1 ? "" : "s"}.{" "}
+          {!preview.used_real_tables && "No table structure was detected — these are raw text lines, not columns."}
+        </p>
+
+        {preview.duplicate_count > 0 && (
+          <div className="warning-banner">
+            {preview.duplicate_count} of these rows already appear to exist in the target spreadsheet.
+            Double check you're not re-uploading the same document before confirming.
+          </div>
+        )}
+
+        <div className="card">
+          <div className="preview-table-wrap">
+            <table className="preview-table">
+              <thead>
+                <tr>
+                  {preview.header.map((h, i) => (
+                    <th key={i}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shownRows.map((row, i) => (
+                  <tr key={i}>
+                    {row.map((cell, j) => (
+                      <td key={j}>{String(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview.rows.length > PREVIEW_ROW_LIMIT && (
+            <div className="hint">Showing first {PREVIEW_ROW_LIMIT} of {preview.rows.length} rows.</div>
+          )}
+
+          <div className="preview-actions">
+            <button className="submit-btn" onClick={handleConfirm} disabled={loading}>
+              {loading ? "Saving..." : `Confirm & ${mode === "append" ? "Append" : "Download"}`}
+            </button>
+            <button className="secondary-btn" onClick={handleCancelPreview} disabled={loading}>
+              Cancel
+            </button>
+          </div>
+
+          {status && <div className={`status ${status.type}`}>{status.message}</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="eyebrow">PDF → Excel</div>
       <h1>Extract invoice data into a spreadsheet</h1>
-      <p className="subtitle">Drop in a PDF, choose a new or existing spreadsheet, and download the result.</p>
+      <p className="subtitle">Drop in a PDF, choose a new or existing spreadsheet, review, then download.</p>
 
       <div className="card">
         <div
@@ -182,7 +295,7 @@ export default function ExtractPage() {
                 setExistingFile(file);
               }}
             />
-            <div className="hint">Rows from this PDF will be added to the end of this file.</div>
+            <div className="hint">Rows from this PDF will be added to the end of this file. We'll flag likely duplicates before you confirm.</div>
           </div>
         )}
 
@@ -206,8 +319,8 @@ export default function ExtractPage() {
           />
         </div>
 
-        <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
-          {loading ? "Extracting..." : "Extract and download"}
+        <button className="submit-btn" onClick={handleExtract} disabled={loading}>
+          {loading ? "Extracting..." : "Extract and review"}
         </button>
 
         {status && <div className={`status ${status.type}`}>{status.message}</div>}
